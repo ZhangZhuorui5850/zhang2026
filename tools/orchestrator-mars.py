@@ -649,8 +649,11 @@ def main(argv=None):
     ap.add_argument("--task", help="题面文件路径（md/txt）；也可把题面正文直接粘进 --task-text")
     ap.add_argument("--task-text", default="", help="题面正文（与 --task 二选一）")
     ap.add_argument("--run-dir", default="runs", help="黑板目录，默认 ./runs")
-    ap.add_argument("--prompts-dir", default=str(Path(__file__).resolve().parent / "prompts"),
-                    help="提示词分册目录，默认同目录 prompts/")
+    _here = Path(__file__).resolve().parent
+    _cand = [_here / "prompts", _here.parent / "prompts"]     # 兼容平铺布局与 tools/ 布局
+    _default_prompts = next((str(c) for c in _cand if c.is_dir()), str(_cand[0]))
+    ap.add_argument("--prompts-dir", default=_default_prompts,
+                    help="提示词分册目录，默认自动探测 prompts/")
     ap.add_argument("--stages", default="all", help="逗号分隔，如 g0,g1 或 all")
     ap.add_argument("--from", dest="from_stage", default=None, help="从某阶段续跑，如 g2")
     ap.add_argument("--only", default=None, help="只跑某阶段")
