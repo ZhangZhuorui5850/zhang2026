@@ -25,7 +25,7 @@
 ## 30 秒上手
 
 ```bash
-git clone https://github.com/<你的账号>/zhang2026.git
+git clone https://github.com/ZhangZhuorui5850/zhang2026.git
 cd zhang2026
 
 # ① 看流水线装没装上（不联网、不花钱）
