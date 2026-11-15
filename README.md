@@ -126,9 +126,12 @@ zhang2026/
 │   ├── run.sh                 启动/观察/停止（tmux 优先）
 │   ├── README-TEMPLATE.md     六段式 README 模板
 │   └── config.example.json
-└── scripts/
-    ├── bootstrap.sh           建 runs/ 并生成"该对 agent 说的话"
-    └── push.sh                一键推到自己的 GitHub
+├── scripts/
+│   ├── bootstrap.sh           建 runs/ 并生成"该对 agent 说的话"
+│   └── push.sh                一键推送到自己的 GitHub
+├── ci/github-actions-selftest.yml   CI 模板（复制到 .github/workflows/ 即启用）
+├── Makefile                   make selftest / dry / smoke / prompts / search
+└── CHANGELOG.md
 ```
 
 ---
@@ -165,7 +168,7 @@ zhang2026/
 
 ## 实测状态
 
-- `selftest.py`：**29 项全通过** —— 10 阶段门控、工具循环真的发起检索、指标从日志确定性抽取（0.8123）、幂等续跑零调用、端点挂掉降级、max_calls 预算保护。CI 在 3 个 Python 版本上重跑。
+- `selftest.py`：**29 项全通过** —— 10 阶段门控、工具循环真的发起检索、指标从日志确定性抽取（0.8123）、幂等续跑零调用、端点挂掉降级、max_calls 预算保护。CI 模板在 3 个 Python 版本上重跑。
 - `train_template.py`：四模式实测通过，异常落盘 + exit 1 已验证。
 - `monitor.py`：RUNNING/STALL/DIVERGE/OOM/DEAD/DONE 六态逐个造日志验证。
 - `qa_check.py`：好提交 PASS、坏提交 FAIL 并给修复清单，两路径验证。
