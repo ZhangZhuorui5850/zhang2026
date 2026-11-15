@@ -16,7 +16,7 @@
 | 类型 | 路径 | 作用 |
 |---|---|---|
 | 流程图 | `docs/00-playbook.md` | 8 小时时间盒、题型映射、救场动作 |
-| 提示词 | `prompts/*.md` → 合并版 `PROMPTS.md` | 每个角色该说什么（P0–P15、F1–F4） |
+| 提示词 | `prompts/*.md` → 合并版 `PROMPTS.md` | 每个角色该说什么（P0–P15 + P1.2、F1–F4，共 23 条） |
 | 编排器 | `tools/orchestrator-mars.py` | 无人值守跑完情报→方案→编码→交付 |
 | 工具 | `tools/{train_template,monitor,qa_check,run.sh}` | 骨架 / 监控 / 验收 / 启动 |
 
