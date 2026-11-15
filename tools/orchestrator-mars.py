@@ -254,7 +254,7 @@ def load_prompt_library(prompts_dir):
     for f in sorted(d.glob("*.md")):
         text = f.read_text(encoding="utf-8", errors="replace")
         # 以 "## P" 切段
-        chunks = re.split(r"\n##\s+(P[\d.]+)", text)
+        chunks = re.split(r"\n##\s+((?:P|F)[\d.]+)", text)
         for i in range(1, len(chunks) - 1, 2):
             pid, body = chunks[i], chunks[i + 1]
             m = re.search(r"```text\n(.*?)```", body, re.S)
