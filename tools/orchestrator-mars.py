@@ -10,19 +10,19 @@ MARS-8H · 科研实训多智能体编排器
 快速开始
 --------
 # 1) 只看流水线长什么样，不联网（考前自查用）
-python3 03-orchestrator-mars.py --dry-run
+python3 tools/orchestrator-mars.py --dry-run
 
 # 2) 真跑情报层：5 个侦察兵并行 + 交叉质询
 export MARS_BASE_URL="https://api.deepseek.com/v1"
 export MARS_API_KEY="sk-..."
 export MARS_MODEL="deepseek-chat"
-python3 03-orchestrator-mars.py --task 题目.md --stages g0,g1
+python3 tools/orchestrator-mars.py --task 题目.md --stages g0,g1
 
 # 3) 全流程（含写代码 + 跑 smoke，需显式授权执行）
-python3 03-orchestrator-mars.py --task 题目.md --stages all --allow-exec --minutes 480
+python3 tools/orchestrator-mars.py --task 题目.md --stages all --allow-exec --minutes 480
 
 # 4) 从某个门控续跑（断线/换模型后恢复）
-python3 03-orchestrator-mars.py --task 题目.md --from g2
+python3 tools/orchestrator-mars.py --task 题目.md --from g2
 
 设计要点（对应 01-多智能体架构设计.md）
 --------------------------------------
@@ -640,7 +640,7 @@ def print_plan(prompts, stages, minutes, allow_exec, run_dir):
     total_par = sum(STAGES[s][2] for s in stages)
     print("阶段数 %d，子任务总数约 %d（含并行侦察兵）" % (len(stages), total_par))
     print("时间分配建议：G0 8% / G1 12% / G2 10% / G3 15% / G4 35% / G5 15% / 缓冲 5%")
-    print("时间分配依据：见 01-多智能体架构设计.md 第 4 节")
+    print("时间分配依据：见 docs/01-architecture.md 第 4 节")
     print(line + "\n")
 
 
