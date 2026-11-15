@@ -9,7 +9,7 @@
 - **JSON 产物校验 + 一次自动修补**：`g0` / `g2c` 的 JSON 必须有必填字段，缺了自动发一轮修补，仍缺就落盘标记。
 - **预算与容错**：`--max-calls` 调用上限、`--fallback-model` 主模型失败自动切换、单阶段异常不中断全局（写 `BLOCKED.md` 后降级继续）。
 - **离线自检 29 项**：`tools/selftest.py` 起 mock 端点跑完整 10 阶段，覆盖门控、工具循环、指标抽取、幂等续跑、D1 降级、max_calls。
-- **CI**：`.github/workflows/selftest.yml` 在 Python 3.9/3.11/3.12 上跑自检，并校验 `PROMPTS.md` 与分册一致。
+- **CI 模板**：`ci/github-actions-selftest.yml`（Python 3.9/3.11/3.12 跑自检 + 校验 `PROMPTS.md` 一致）。复制到 `.github/workflows/` 即启用；未启用也可用 `make selftest`。
 - **Makefile**：`make selftest / dry / smoke / prompts / search / push`。
 
 新增提示词：

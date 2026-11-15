@@ -1,3 +1,9 @@
+# 启用方法（两选一）：
+#   A. 命令行：cp ci/github-actions-selftest.yml .github/workflows/selftest.yml
+#      然后 commit + push；要求 token 带 workflow 权限（classic 勾 workflow，或 fine-grained 勾 Workflows: Write）
+#   B. GitHub 网页：Add file → Create new file，路径填 .github/workflows/selftest.yml，粘贴本文件内容
+# 未启用也不影响使用：本地跑 `make selftest` 效果相同（29 项，离线）。
+
 name: selftest
 
 on:
