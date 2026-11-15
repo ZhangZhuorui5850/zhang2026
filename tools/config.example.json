@@ -1,0 +1,24 @@
+{
+  "seed": 42,
+  "data": {
+    "train": "/vepfs-readonly/题目路径/train",
+    "val": "/vepfs-readonly/题目路径/val",
+    "test": "/vepfs-readonly/题目路径/test",
+    "max_samples": 0
+  },
+  "model": {
+    "name": "换成你的 backbone",
+    "hidden": 256,
+    "max_len": 512
+  },
+  "train": {
+    "epochs": 3,
+    "batch_size": 16,
+    "lr": 0.0002,
+    "num_workers": 0,
+    "grad_clip": 1.0,
+    "amp": "bf16"
+  },
+  "log_every": 20,
+  "out_dir": "runs"
+}

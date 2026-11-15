@@ -1,0 +1,19 @@
+# 运行产物：绝不提交（可能含题目路径、数据名、指标）
+runs/
+*.log
+*.pid
+submission_backup.tgz
+
+# 大文件与缓存
+*.pt *.pth *.bin *.safetensors *.ckpt *.h5 *.npz *.npy
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
+venv/
+node_modules/
+
+# 环境变量与凭据
+.env
+*.key
+*.pem
