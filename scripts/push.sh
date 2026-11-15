@@ -115,13 +115,39 @@ case "$CODE" in
 esac
 
 # ---------- 5. 推送 ----------
-git remote remove origin 2>/dev/null || true
-git remote add origin "https://x-access-token:${TOKEN}@github.com/${USER}/${REPO_NAME}.git"
-git push -q -u origin "$BRANCH"
-# 推完立刻把 token 从 remote 抹掉
-git remote set-url origin "https://github.com/${USER}/${REPO_NAME}.git"
+CLEAN_URL="https://github.com/${USER}/${REPO_NAME}.git"
+AUTH_URL="https://x-access-token:${TOKEN}@github.com/${USER}/${REPO_NAME}.git"
 
-echo "√ 已推送"
+# 无论成功失败，退出时都把 token 从 .git/config 里抹掉
+scrub() { git remote set-url origin "$CLEAN_URL" 2>/dev/null || git remote remove origin 2>/dev/null || true; }
+trap scrub EXIT INT TERM
+
+git remote remove origin 2>/dev/null || true
+git remote add origin "$AUTH_URL"
+
+# credential.helper= 用来屏蔽 macOS 钥匙串助手；它在本机报 -60006，
+# 会让 git 在推送成功之后仍然返回非零，看起来像失败。
+push_once() {
+  GIT_TERMINAL_PROMPT=0 git -c credential.helper= push -u origin "$BRANCH"
+}
+
+if ! push_once 2>&1 | tee /tmp/zhang2026_push.log | grep -vE "failed to store"; then
+  echo "… 第一次推送未成功，10 秒后重试一次"
+  sleep 10
+  push_once || { echo "× 推送失败，原始输出："; cat /tmp/zhang2026_push.log; exit 1; }
+fi
+
+# 校验远端真的前进了
+LOCAL_SHA="$(git rev-parse HEAD)"
+REMOTE_SHA="$(git ls-remote "$CLEAN_URL" "refs/heads/$BRANCH" | cut -f1)"
+echo "   local  $LOCAL_SHA"
+echo "   remote $REMOTE_SHA"
+if [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
+  echo "× 远端与本地不一致，推送未生效"
+  exit 1
+fi
+
+echo "√ 已推送（远端已确认）"
 echo
 echo "=============================================================="
 echo " 公开地址： https://github.com/$USER/$REPO_NAME"
