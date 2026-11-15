@@ -16,7 +16,7 @@
 | 类型 | 路径 | 作用 |
 |---|---|---|
 | 流程图 | `docs/00-playbook.md` | 8 小时时间盒、题型映射、救场动作 |
-| 提示词 | `prompts/*.md` → 合并版 `PROMPTS.md` | 每个角色该说什么（P0–P15 + P1.2、F1–F4，共 23 条） |
+| 提示词 | `prompts/*.md` → 合并版 `PROMPTS.md` | 每个角色该说什么（P0–P15 + P1.2 + P13.5、F1–F4，共 24 条） |
 | 编排器 | `tools/orchestrator-mars.py` | 无人值守跑完情报→方案→编码→交付 |
 | 工具 | `tools/{train_template,monitor,qa_check,run.sh}` | 骨架 / 监控 / 验收 / 启动 |
 
@@ -93,6 +93,7 @@ P10 提分            → runs/45_boost.md
 P11 评测固化        → runs/60_metrics.json
 P12 交付            → runs/90_submission/
 P13 验收            → runs/95_qa.md           末行 QA_RESULT:
+P13.5 量规自评      → runs/96_rubric_self.md   末行 SELF_SCORE: <分>/100
 P14 时间盒          → 随时可调
 ```
 
@@ -145,7 +146,7 @@ python3 tools/qa_check.py \
   --log runs/50_logs/main.log
 ```
 
-必须看到 `QA_RESULT: PASS`。看到 FAIL 就按它给的修复清单逐条改，改完重跑。
+必须看到 `QA_RESULT: PASS`。再做一次量规自评（P13.5），`SELF_SCORE ≥ 80` 且红线全过才交。
 
 ---
 

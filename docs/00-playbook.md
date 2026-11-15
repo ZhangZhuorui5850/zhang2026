@@ -122,8 +122,8 @@ curl -m 6 -sI https://registry.npmmirror.com | head -1
 | ⑩ 提分 | 330–400 | 误差分析 → 只做 ROI 第一 | `P10` | `45_boost.md` | Δ>0 才保留 |
 | ⑪ 评测 | 400–415 | 固化指标、两次复现 | `P11` | `60_metrics.json` | 两次结果一致 |
 | ⑫ 交付 | 415–445 | 生成题面要求的全部文件 | `P12` | `90_submission/` | json 能 load、条数对 |
-| ⑬ 验收 | 445–465 | 机械检查 + 人工抽查 | `P13` + `qa_check.py` | `95_qa.md` | `QA_RESULT: PASS` |
-| ⑭ 冻结 | 465–480 | 只读。打包备份 | `P14` | `submission_backup.tgz` | 不许再改代码 |
+| ⑬ 验收 | 440–458 | 机械检查 + 六维量规自评 | `P13` + `P13.5` + `qa_check.py` | `95_qa.md` `96_rubric_self.md` | `QA_RESULT: PASS` 且 `SELF_SCORE ≥ 80` |
+| ⑭ 冻结 | 458–480 | 只读。打包备份 | `P14` | `submission_backup.tgz` | 不许再改代码 |
 
 **三个硬节点（背下来）**
 
@@ -212,10 +212,11 @@ python3 train.py --mode train  --config config.json      # 先 epochs=1 看曲�
  ├─ P11 评测固化 ────────────→ 60_metrics.json
  ├─ P12 交付物 ──────────────→ 90_submission/
  ├─ P13 验收 + qa_check.py ──→ QA_RESULT: PASS
+ ├─ P13.5 量规自评 ──────────→ SELF_SCORE: 86/100（六维 + 三条红线）
  └─ P14 时间盒收尾 ──────────→ 冻结 + 打包
 ```
 
-**只想记三条**：`F3` 开场算账 → `P1–P6` 想清楚 → `P7–P13` 做出来并交出去。
+**只想记三条**：`F3` 开场算账 → `P1–P6` 想清楚 → `P7–P13.5` 做出来、交出去、按量规自查一遍。
 
 ---
 
