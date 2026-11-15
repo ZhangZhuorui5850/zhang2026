@@ -44,9 +44,17 @@ import traceback
 import unicodedata
 import urllib.error
 import urllib.request
+
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
+
+# 同目录的零依赖检索工具（可选：导入失败则检索能力关闭，走 D1 降级）
+try:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import netsearch  # type: ignore
+except Exception:  # noqa: BLE001
+    netsearch = None
 
 # ----------------------------------------------------------------------------
 # 0. 常量与默认值
@@ -68,10 +76,11 @@ STAGES = {
     "g2b": ("红队评审 + 决策矩阵",                             "P5",   1, "25_decision.md"),
     "g2c": ("实验规格书（json + md）",                          "P6",   1, "30_spec.json"),
     "g3":  ("Coder：写代码 + smoke 自检 + 修错",               "P7",   1, "40_code/"),
+    "g3b": ("指标抽取与交付预检（确定性，不调模型）",          "-",    1, "60_metrics.json"),
     "g4":  ("提分冲刺：误差分析 → ROI → 只做第一名",           "P10",  1, "45_boost.md"),
     "g5":  ("交付物 + QA 闸门",                                "P12",  1, "90_submission/"),
 }
-STAGE_ORDER = ["g0", "g1", "g1s", "g2a", "g2b", "g2c", "g3", "g4", "g5"]
+STAGE_ORDER = ["g0", "g1", "g1s", "g2a", "g2b", "g2c", "g3", "g3b", "g4", "g5"]
 
 # 每个门控完成后必须出现的标志字符串（用于判定该 stage 是否"真的成了"）
 GATE_MARK = {
@@ -82,6 +91,7 @@ GATE_MARK = {
     "g2b": "DECISION:",
     "g2c": "\"mission_id\"",
     "g3": "SMOKE_OK",
+    "g3b": "\"metric_name\"",
     "g4": "| 改动 |",
     "g5": "QA_RESULT:",
 }
@@ -169,10 +179,14 @@ class LLMError(RuntimeError):
 
 
 class Client(object):
-    def __init__(self, base_url, api_key, model, temperature=0.4, max_tokens=4096, timeout=600):
+    def __init__(self, base_url, api_key, model, temperature=0.4, max_tokens=4096,
+                 timeout=600, max_calls=0, fallback_models=None):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
+        self.max_calls = max_calls
+        self.fallback_models = [m for m in (fallback_models or []) if m]
+        self.dead_models = set()
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.timeout = timeout
@@ -181,6 +195,23 @@ class Client(object):
         self._lock = threading.Lock()
 
     def chat(self, system, user, model=None, temperature=None, max_tokens=None):
+        if self.max_calls and self.calls >= self.max_calls:
+            raise LLMError("已达调用上限 max_calls=%d（预算保护，防止把配额烧光）" % self.max_calls)
+        try:
+            return self._chat_once(system, user, model, temperature, max_tokens)
+        except LLMError:
+            # 主模型挂了就换备用模型再试一次（同一端点、同一 key）
+            for alt in self.fallback_models:
+                if alt in self.dead_models or alt == (model or self.model):
+                    continue
+                try:
+                    log("主模型失败，回退到 %s" % alt)
+                    return self._chat_once(system, user, alt, temperature, max_tokens)
+                except LLMError:
+                    self.dead_models.add(alt)
+            raise
+
+    def _chat_once(self, system, user, model=None, temperature=None, max_tokens=None):
         payload = {
             "model": model or self.model,
             "messages": [
@@ -269,6 +300,33 @@ def load_prompt_library(prompts_dir):
 
 WRITE_RE = re.compile(r"<write\s+path=\"([^\"]+)\">\n?(.*?)</write>", re.S)
 RUN_RE = re.compile(r"<run>\n?(.*?)</run>", re.S)
+SEARCH_RE = re.compile(r"<search>(.*?)</search>", re.S)
+FETCH_RE = re.compile(r"<fetch>(.*?)</fetch>", re.S)
+
+# 每个阶段必须出现的 JSON 字段（用于产物校验与一次自动修补）
+REQUIRED_KEYS = {
+    "g0": ["objective", "inputs", "outputs", "metric", "constraints", "unknowns"],
+    "g2c": ["mission_id", "submission", "metric", "code_entry", "smoke_test"],
+}
+
+
+def extract_json_block(text):
+    m = re.search(r"```json\n(.*?)```", text, re.S)
+    raw = m.group(1).strip() if m else ""
+    if not raw:
+        start, end = text.find("{"), text.rfind("}")
+        raw = text[start:end + 1] if start >= 0 and end > start else ""
+    try:
+        return json.loads(raw), raw
+    except ValueError:
+        return None, raw
+
+
+def missing_keys(stage, obj):
+    need = REQUIRED_KEYS.get(stage)
+    if not need or not isinstance(obj, dict):
+        return need or []
+    return [k for k in need if k not in obj or obj[k] in (None, "", [], {})]
 
 
 def apply_tool_blocks(text, workdir, allow_exec, timeout=600):
@@ -356,6 +414,7 @@ class Orchestrator(object):
         "g2b": "25_decision.md",
         "g2c": "30_spec.json",
         "g3": "50_logs/smoke.log",
+        "g3b": "60_metrics.json",
         "g4": "45_boost.md",
         "g5": "95_qa.md",
     }
@@ -375,6 +434,12 @@ class Orchestrator(object):
             smoke = self.board.read("50_logs/smoke.log")
             # 授权执行时必须有 EXIT 0；未授权时只要求代码已落盘
             return ("[EXIT] 0" in smoke) or ("[WRITE]" in smoke)
+        if stage == "g3b":
+            try:
+                obj = json.loads(self.board.read("60_metrics.json") or "{}")
+            except ValueError:
+                return False
+            return obj.get("value") is not None
         rel = self.GATE_FILE.get(stage)
         if not rel or not self.board.exists(rel):
             return False
@@ -443,25 +508,96 @@ class Orchestrator(object):
             self.board)
         return gate
 
+    # -- 检索工具循环（让侦察兵真的能上网查） -------------------------------
+    def tool_loop(self, system, user, max_rounds=3, temperature=0.6, model=None,
+                  tag="scout"):
+        """模型可以在回答里写 <search>查询</search> / <fetch>url</fetch>，
+        编排器执行后把结果喂回去，最多往返 max_rounds 轮。"""
+        convo = user
+        out = ""
+        for rnd in range(max_rounds + 1):
+            out = self.client.chat(system, convo, model=model, temperature=temperature)
+            queries = [q.strip() for q in SEARCH_RE.findall(out)][:3]
+            urls = [u.strip() for u in FETCH_RE.findall(out)][:2]
+            if not queries and not urls:
+                return out
+            if rnd == max_rounds:
+                break
+            feed = []
+            if not netsearch:
+                feed.append("（检索模块不可用：按 D1 降级，结论标 confidence<=0.5）")
+            else:
+                for q in queries:
+                    res = netsearch.search(q, limit=5)
+                    feed.append("### search: %s\n%s" % (q, netsearch.format_results(res)))
+                    self.board.append("50_logs/tool_calls.log",
+                                      "\n[%s] search=%s hits=%d\n" % (tag, q, len(res)))
+                for u in urls:
+                    txt = netsearch.fetch(u)
+                    feed.append("### fetch: %s\n%s" % (u, txt[:3000] or "（抓取失败）"))
+                    self.board.append("50_logs/tool_calls.log",
+                                      "[%s] fetch=%s chars=%d\n" % (tag, u, len(txt)))
+            convo = (convo + "\n\n" + out + "\n\n## 工具返回\n" + "\n\n".join(feed)
+                     + "\n\n基于以上真实结果继续。够用就直接输出最终卡片正文"
+                       "（不要再写 <search>/<fetch> 标签）。")
+            log("  %s 第%d轮工具往返：%d 次检索 %d 次抓取" % (tag, rnd + 1, len(queries), len(urls)),
+                self.board)
+        return out
+
+    # -- JSON 产物校验 + 一次自动修补 ---------------------------------------
+    def checked_json_stage(self, stage, pid, ctx, path_json, path_md=None):
+        out = self.client.chat(CONDUCTOR_SYSTEM, self.header(stage, pid, ctx), temperature=0.2)
+        obj, raw = extract_json_block(out)
+        miss = missing_keys(stage, obj)
+        if miss:
+            log("%s JSON 缺字段 %s，发起一次修补" % (stage, miss), self.board)
+            fix = (ctx + "\n\n## 你上一轮的输出\n" + out[:4000]
+                   + "\n\n## 问题\nJSON 缺少这些必填字段：%s。"
+                     "只输出修正后的完整 ```json 代码块，不要解释。\n" % miss)
+            out2 = self.client.chat(CONDUCTOR_SYSTEM, self.header(stage, pid, fix), temperature=0.1)
+            obj2, raw2 = extract_json_block(out2)
+            if not missing_keys(stage, obj2):
+                obj, raw, out = obj2, raw2, out2
+            else:
+                log("%s 修补后仍缺字段，落盘原始内容并标记" % stage, self.board)
+        if path_md:
+            self.board.write(path_md, out)
+        self.board.write(path_json, raw if raw else json.dumps({"parse_error": "无 JSON"}, ensure_ascii=False))
+        return not missing_keys(stage, obj)
+
     # g0 --------------------------------------------------------------------
     def stage_g0(self, pid):
         env_cmds = ("whoami; hostname; nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null; "
                     "python3 -V; nproc; df -h ~ | tail -1; ls -la")
-        out = self.client.chat(CONDUCTOR_SYSTEM, self.header(
-            "g0", pid, "## 环境（供你参考，不要重复执行）\n%s\n" % env_cmds))
-        self.board.write("00_task.md", out)
-        return True
+        ctx = ("## 环境（供你参考，不要重复执行）\n%s\n\n"
+               "## 硬性要求\n正文最后必须有一个 ```json 代码块，且包含这些键：%s\n"
+               % (env_cmds, ", ".join(REQUIRED_KEYS["g0"])))
+        ok = self.checked_json_stage("g0", pid, ctx, "00_task.json", "00_task.md")
+        return ok
 
     # g1：5 视角并行 ---------------------------------------------------------
     def stage_g1(self, pid):
         base = self.prompt(pid)
         extra_ctx = "## 已确认的任务契约（读它，不要重新解析题面）\n%s\n" % self.board.read("00_task.md", 5000)
 
+        tools_contract = (
+            "\n## 你可以用工具（这是本题信息质量的关键）\n"
+            "需要外部信息时，在回复里写标签，系统会执行并返回结果：\n"
+            "  <search>检索词</search>   一次最多 3 条，尽量具体（含任务名/指标名/报错原文）\n"
+            "  <fetch>https://...</fetch> 一次最多 2 条，用于读某个具体页面的正文\n"
+            "先发工具调用、拿到结果后再写卡片；不要凭记忆编造 URL 或数字。\n"
+            "如果没有网络，直接按 D1 降级写卡片，并在来源列标 `推理`。\n"
+            "最终卡片正文里不要再出现 <search>/<fetch> 标签。\n")
+
         def one(view):
             user = self.header("g1", pid, extra_ctx).replace("<VIEW>", view)
-            user = "[VIEW=%s]\n\n" % view + user
+            user = "[VIEW=%s]\n\n" % view + user + tools_contract
             try:
-                text = self.client.chat(CONDUCTOR_SYSTEM, user, model=CHEAP_MODEL, temperature=0.6)
+                text = self.tool_loop(CONDUCTOR_SYSTEM, user, max_rounds=2,
+                                      temperature=0.6, model=CHEAP_MODEL,
+                                      tag="scout-%s" % view)
+                if SEARCH_RE.search(text) or FETCH_RE.search(text):
+                    text = SEARCH_RE.sub("", FETCH_RE.sub("", text))
             except LLMError as exc:
                 text = ("## VIEW: %s\n### 硬结论\n| # | 结论 | 置信度 | 来源 | 验证 |\n"
                         "| 0 | 该视角检索失败：%s | 0.1 | DEGRADED=no_net | 跳过 |\n"
@@ -500,19 +636,9 @@ class Orchestrator(object):
     def stage_g2c(self, pid):
         ctx = ("## 决策\n%s\n\n## 任务契约（提交物逐字抄它）\n%s\n"
                % (self.board.read("25_decision.md", 4000), self.board.read("00_task.md", 4000)))
-        out = self.client.chat(CONDUCTOR_SYSTEM, self.header("g2c", pid, ctx), temperature=0.2)
-        self.board.write("30_spec.md", out)
-        block = re.search(r"```json\n(.*?)```", out, re.S)
-        if block:
-            raw = block.group(1).strip()
-            try:
-                json.loads(raw)
-            except ValueError as exc:
-                raw = json.dumps({"parse_error": str(exc), "raw": raw[:2000]}, ensure_ascii=False, indent=2)
-        else:
-            raw = json.dumps({"parse_error": "模型未输出 json 代码块"}, ensure_ascii=False)
-        self.board.write("30_spec.json", raw)
-        return True
+        ctx = ctx + ("\n## 硬性要求\n最后必须给 ```json 代码块，且包含这些键：%s\n"
+                     % ", ".join(REQUIRED_KEYS["g2c"]))
+        return self.checked_json_stage("g2c", pid, ctx, "30_spec.json", "30_spec.md")
 
     # g3：写代码 + smoke + 修错 -------------------------------------------------
     def stage_g3(self, pid):
@@ -542,6 +668,85 @@ class Orchestrator(object):
 
         self.board.write("50_logs/smoke.log", report)
         return "EXIT] 0" in report
+
+    # g3b：不调模型的确定性阶段 -------------------------------------------------
+    def stage_g3b(self, pid):
+        import hashlib
+
+        logs = self.board.listdir("50_logs")
+        skip = ("smoke", "tools", "qa_precheck", "round")
+        cand = [l for l in logs if l.endswith(".log") and not any(k in l.lower() for k in skip)]
+        cand.sort(key=lambda l: (0 if "main" in l.lower() else 1,
+                                 -self.board.p(l).stat().st_mtime))
+        text = ""
+        used = ""
+        for l in cand:
+            t = self.board.read(l)
+            if "[EVAL]" in t or "[DONE]" in t:
+                text, used = t, l
+                break
+
+        metric_name, value, extra = "metric", None, {}
+        if text:
+            evals = [ln for ln in text.splitlines() if "[EVAL]" in ln]
+            if evals:
+                kv = dict(re.findall(r"([A-Za-z_][A-Za-z0-9_]*)=([-+0-9.eE]+)", evals[-1]))
+                for k in ("acc", "accuracy", "f1", "auc", "auprc", "score", "metric", "rmse", "mae", "loss"):
+                    if k in kv:
+                        metric_name, value = k, float(kv[k])
+                        break
+                extra = kv
+            done = [ln for ln in text.splitlines() if "[DONE]" in ln]
+            if done and value is None:
+                kv = dict(re.findall(r"([A-Za-z_][A-Za-z0-9_]*)=([-+0-9.eE]+)", done[-1]))
+                for k in ("best_acc", "acc", "f1", "auc", "score"):
+                    if k in kv:
+                        metric_name, value = k, float(kv[k])
+                        break
+
+        code_hash = ""
+        code_dir = self.board.p("40_code")
+        if code_dir.exists():
+            h = hashlib.md5()
+            for f in sorted(code_dir.rglob("*.py")):
+                h.update(f.read_bytes())
+            code_hash = h.hexdigest()
+
+        payload = {
+            "metric_name": metric_name,
+            "value": value,
+            "direction": "max",
+            "split": "val_or_test（按日志；交卷前用官方脚本复核）",
+            "n_samples": extra.get("n") or extra.get("n_samples"),
+            "seed": extra.get("seed"),
+            "checkpoint": "runs/70_ckpt/best.pt" if self.board.p("70_ckpt").exists() else None,
+            "eval_cmd": "见 30_spec.json 的 metric.eval_cmd",
+            "source_log": used,
+            "code_hash": code_hash,
+            "derived_by": "stage_g3b（确定性抽取，非模型生成）",
+            "caveats": [] if value is not None else ["日志里没有可解析的 [EVAL]/[DONE] 行，指标为空"],
+        }
+        self.board.write("60_metrics.json", json.dumps(payload, ensure_ascii=False, indent=2))
+
+        # 交付预检：如果 qa_check.py 在，就跑一遍（不改任何东西，只报告）
+        qa = Path(__file__).resolve().parent / "qa_check.py"
+        sub = self.board.p("90_submission")
+        report = "qa_check skipped（未找到脚本或无提交目录）"
+        if qa.exists() and sub.exists():
+            try:
+                proc = subprocess.run(
+                    [sys.executable, str(qa), "--submission", str(sub),
+                     "--metrics", str(self.board.p("60_metrics.json"))],
+                    cwd=str(Path(__file__).resolve().parent.parent),
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180)
+                report = proc.stdout.decode("utf-8", "replace")
+            except Exception as exc:  # noqa: BLE001
+                report = "qa_check 执行失败：%s" % exc
+        self.board.write("50_logs/qa_precheck.log", report)
+        tail = [ln for ln in report.splitlines() if "QA_RESULT" in ln]
+        log("g3b 指标=%s=%s（来源 %s）；预检 %s"
+            % (metric_name, value, used or "无", tail[-1].strip() if tail else "未产出结论"), self.board)
+        return value is not None
 
     # g4 -------------------------------------------------------------------
     def stage_g4(self, pid):
@@ -625,6 +830,8 @@ def print_plan(prompts, stages, minutes, allow_exec, run_dir):
     print("黑板目录 : %s" % run_dir)
     print("总预算   : %d 分钟" % minutes)
     print("执行授权 : %s" % ("是（会真的跑命令）" if allow_exec else "否（只写文件，<run> 块跳过）"))
+    print("联网检索 : %s" % ("可用（%s）" % ("SearXNG" if os.environ.get("MARS_SEARXNG_URL") else "DuckDuckGo")
+                             if netsearch else "关闭（D1 降级）"))
     if prompts:
         print("提示词库 : 已从 prompts/ 装载 %d 条 (%s)" % (len(prompts), ",".join(sorted(prompts))))
     else:
@@ -666,7 +873,17 @@ def main(argv=None):
     ap.add_argument("--force", action="store_true", help="忽略已有产物，强制重跑")
     ap.add_argument("--temp", type=float, default=0.4)
     ap.add_argument("--max-tokens", type=int, default=8192)
+    ap.add_argument("--max-calls", type=int, default=0,
+                    help="API 调用上限（0=不限）；防止把配额烧光")
+    ap.add_argument("--fallback-model", default=os.environ.get("MARS_MODEL_FALLBACK", ""),
+                    help="主模型失败时的备用模型（逗号分隔）")
+    ap.add_argument("--no-search", action="store_true",
+                    help="关闭联网检索，强制走 D1 降级（考场无网时用）")
     args = ap.parse_args(argv)
+
+    global netsearch
+    if args.no_search:
+        netsearch = None
 
     prompts = load_prompt_library(args.prompts_dir)
     stages = parse_stages(args.only or args.stages)
@@ -692,7 +909,9 @@ def main(argv=None):
 
     board = Board(args.run_dir)
     client = Client(args.base_url, args.api_key, args.model,
-                    temperature=args.temp, max_tokens=args.max_tokens)
+                    temperature=args.temp, max_tokens=args.max_tokens,
+                    max_calls=args.max_calls,
+                    fallback_models=[m.strip() for m in args.fallback_model.split(",") if m.strip()])
     orch = Orchestrator(board, client, prompts, task_text,
                         minutes=args.minutes, allow_exec=args.allow_exec, force=args.force)
     print_plan(prompts, stages, args.minutes, args.allow_exec, board.root)

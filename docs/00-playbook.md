@@ -16,6 +16,8 @@
 | 只有网页对话框 | **C 单会话角色扮演** | 粘 `P0 宪法`，之后每换角色先写 `[ROLE] xxx` |
 | 什么都没有 / 模型连不上 | **D 人工** | 打印 `05-一页纸速查卡`，照做 |
 
+**一场考试通常有 4 道题**（往届材料原话：四个题目，可能只有一两个是微调）。所以第 0 步之后立刻做多题调度：粘 `P16`，先算账再动手。
+
 **不要在这里犹豫超过 2 分钟。** D 路线也能拿到及格以上的分，卡在选择上才是真的亏。
 
 ---
@@ -111,13 +113,14 @@ curl -m 6 -sI https://registry.npmmirror.com | head -1
 | 时段 | 分钟 | 干什么 | 粘哪条 | 产出 | 判据（不过就降级） |
 |---|---|---|---|---|---|
 | ① 开局 | 0–15 | 环境清点、建工作台、tmux | — | `~/work/runs/` | `nvidia-smi` 有输出 |
+| ①.5 多题调度 | 15–35 | **几道题？先做哪道？放弃哪道？** | `P16` | `00_schedule.md` + `runs/p1..pN/` | 有放弃清单 + 3 个绝对时刻检查点 |
 | ② 反推评分 | 15–25 | 让 Agent 站在判分侧拆权重 | `F3 判分官` | `runs/05_rubric.md` | 能说出前 3 个得分项 |
 | ③ 任务契约 | 25–45 | 读题、六段解剖、抄提交清单、抽 JSON | `P1` + `P1.2` + `P1.5` | `00_task.md` `01_env.md` | outputs 逐字抄完、依赖白名单有内容 |
 | ④ 情报 | 45–100 | 5 视角并行检索 + 矛盾裁决 | `P2`×5 → `P3` | `10_cards/*` `10_brief.md` | ≥3 张卡，brief 里有"不知道什么" |
 | ⑤ 三方案 | 100–120 | SAFE / SOTA / GREEDY | `P4` | `20_candidates.md` | 三个方案都有回滚点 |
 | ⑥ 裁决 | 120–135 | 红队打分 + 定主线与切换条件 | `P5` | `25_decision.md` | 末行有 `DECISION:` |
 | ⑦ 规格 | 135–150 | 写死启动命令、时间盒、兜底 | `P6` | `30_spec.json` | 5 条自检全过 |
-| ⑧ 编码 | 150–195 | 写代码 + smoke 通过 | `P7` + 骨架 | 代码 + `smoke.log` | `--mode smoke` 退出码 0 |
+| ⑧ 编码 | 150–195 | 写代码 + smoke + 泄漏审计 | `P7` + `P7.5` | 代码 + `smoke.log` + `35_leakage.md` | smoke 退出码 0 且 `LEAKAGE: none` |
 | ⑨ 主训 | 195–330 | 启动、盯、修 | `P8` `P9` | `main.log` `40_progress.md` | 有 `[STEP]` 且 verdict≠DEAD |
 | ⑩ 提分 | 330–400 | 误差分析 → 只做 ROI 第一 | `P10` | `45_boost.md` | Δ>0 才保留 |
 | ⑪ 评测 | 400–415 | 固化指标、两次复现 | `P11` | `60_metrics.json` | 两次结果一致 |
@@ -198,6 +201,7 @@ python3 train.py --mode train  --config config.json      # 先 epochs=1 看曲�
 
 ```
 坐下
+ ├─ P16 多题调度（≥2 题）────→ 00_schedule.md + 放弃清单
  ├─ F3 判分官 ────────────────→ 决定时间怎么分
  ├─ P1 任务契约 + P1.2 解剖 + P1.5 依赖 → 00_task.md / 01_env.md
  ├─ P2 ×5 并行侦察兵 ────────→ 10_cards/
@@ -205,7 +209,8 @@ python3 train.py --mode train  --config config.json      # 先 epochs=1 看曲�
  ├─ P4 三方案 ───────────────→ 20_candidates.md
  ├─ P5 红队裁决 ─────────────→ 25_decision.md（有 DECISION 行）
  ├─ P6 规格书 ───────────────→ 30_spec.json
- ├─ P7 Coder（配 04 骨架）───→ 代码 + SMOKE_OK
+ ├─ P7 Coder（配 tools 骨架）──→ 代码 + SMOKE_OK
+ ├─ P7.5 泄漏审计 ────────────→ LEAKAGE: none
  ├─ P8 启动与监控 ───────────→ main.log / 40_progress.md
  │    └─ 出错 → P9（配额 3）
  ├─ P10 提分冲刺 ────────────→ 45_boost.md
@@ -240,7 +245,7 @@ python3 train.py --mode train  --config config.json      # 先 epochs=1 看曲�
 
 1. **跑一次空转演练**：在本地建个假题面，跑
    `python3 tools/orchestrator-mars.py --task 假题目.md --dry-run`
-   确认 9 个阶段、23 条提示词都装上了。
+   确认 10 个阶段、26 条提示词都装上了。
 2. **跑一次骨架演练**：`cd tools && python3 train_template.py --mode smoke`，看到 `SMOKE_OK`。
 3. **跑一次 bootstrap 演练**：`bash scripts/bootstrap.sh ~/Desktop 480`，把打印出来的那段话复制给 agent 试一遍（用 examples/ 里的虚构题面即可）。
 4. **背下三个时间节点**：T+195 出 baseline、T+384 有可提交版、T+456 冻结。

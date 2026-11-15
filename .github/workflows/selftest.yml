@@ -1,0 +1,33 @@
+name: selftest
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  offline-selftest:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: 编译检查
+        run: python -m py_compile tools/*.py
+
+      - name: 离线自检（mock 端点，无网络依赖）
+        run: python tools/selftest.py
+
+      - name: 提示词总库与分册一致
+        run: |
+          python tools/build_prompts.py
+          git diff --exit-code PROMPTS.md || (echo "PROMPTS.md 与 prompts/ 不一致，请跑 make prompts" && exit 1)
+
+      - name: 计划输出冒烟
+        run: python tools/orchestrator-mars.py --dry-run --no-search | head -20

@@ -18,7 +18,7 @@
 | 流程图 | `docs/00-playbook.md` | 8 小时时间盒、题型映射、救场动作 |
 | 提示词 | `prompts/*.md` → 合并版 `PROMPTS.md` | 每个角色该说什么（P0–P15 + P1.2 + P13.5、F1–F4，共 24 条） |
 | 编排器 | `tools/orchestrator-mars.py` | 无人值守跑完情报→方案→编码→交付 |
-| 工具 | `tools/{train_template,monitor,qa_check,run.sh}` | 骨架 / 监控 / 验收 / 启动 |
+| 工具 | `tools/{train_template,monitor,qa_check,run.sh,netsearch,selftest}` | 骨架 / 监控 / 验收 / 启动 / 检索 / 自检 |
 
 ---
 
@@ -27,7 +27,8 @@
 ```bash
 # ① 确认自己在哪、有什么
 cd <本仓库路径>
-python3 tools/orchestrator-mars.py --dry-run          # 看 9 阶段 / 18 条提示词是否装上
+python3 tools/selftest.py                            # 29 项离线自检，全过再继续
+python3 tools/orchestrator-mars.py --dry-run          # 看 10 阶段 / 26 条提示词是否装上
 
 # ② 确认题目在哪（不要把路径写死，先探测）
 ls -la <题目路径>; find <题目路径> -maxdepth 2 -type f | head -30
@@ -51,6 +52,7 @@ mkdir -p runs/{10_cards,20_plan,50_logs,70_ckpt,90_submission}
 | G1 | `runs/10_cards/*.md` + `runs/10_brief.md` | ≥3 张卡，brief 里有"我们不知道什么" |
 | G2 | `runs/30_spec.json` | 5 条自检全过，含启动命令与 fallback |
 | G3 | 代码 + `runs/50_logs/smoke.log` | `--mode smoke` 退出码 0 |
+| G3b | `runs/60_metrics.json` | **脚本**从日志确定性抽取指标（不调模型），值不能为空 |
 | G4 | `runs/60_metrics.json` | 数字来自日志，不是手写 |
 | G5 | `runs/90_submission/` + `runs/95_qa.md` | `QA_RESULT: PASS` |
 
@@ -78,6 +80,7 @@ mkdir -p runs/{10_cards,20_plan,50_logs,70_ckpt,90_submission}
 ## 3. 标准执行流（对应提示词编号）
 
 ```
+P16 多题调度        → runs/00_schedule.md       一场多题时先做这道
 F3 判分官          → runs/05_rubric.md          反推评分点，分配时间
 P1 任务契约         → runs/00_task.md
 P1.5 依赖自检       → runs/01_env.md
@@ -87,6 +90,7 @@ P4 三方案           → runs/20_candidates.md
 P5 红队裁决         → runs/25_decision.md       末行 DECISION:
 P6 规格书           → runs/30_spec.{md,json}
 P7 编码（配骨架）    → 代码 + smoke.log
+P7.5 泄漏审计        → runs/35_leakage.md     末行 LEAKAGE:
 P8 启动与监控       → main.log + runs/40_progress.md
 P9 修错（配额 3）    → patch + 复现命令
 P10 提分            → runs/45_boost.md
